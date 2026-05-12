@@ -1,0 +1,18 @@
+# ─────────────────────────────────────────────
+# GreenPulse Cloud Functions — .gitignore
+# ─────────────────────────────────────────────
+
+# Secrets
+.env
+.env.local
+
+# Build output
+lib/
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+firebase-debug.log
+firebase-debug.*.log

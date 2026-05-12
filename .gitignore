@@ -1,0 +1,42 @@
+# ─────────────────────────────────────────────
+# GreenPulse — Root .gitignore
+# ─────────────────────────────────────────────
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE / Editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Firebase
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+pubsub-debug.log
+*.local
+
+# Environment variables (NEVER commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Node (functions)
+functions/node_modules/
+functions/lib/
+functions/.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
