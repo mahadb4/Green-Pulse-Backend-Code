@@ -23,19 +23,42 @@ export async function runCoordinator(
   const actionRef = db.collection('actions').doc(actionId);
 
   try {
+    // Step 0: Transactional lock to prevent double execution (Callable vs Trigger race condition)
+    let canProceed = false;
+    await db.runTransaction(async (tx) => {
+      const doc = await tx.get(actionRef);
+      if (doc.exists && doc.data()?.status === 'pending') {
+        tx.update(actionRef, { status: 'verifying' });
+        canProceed = true;
+      }
+    });
+
+    if (!canProceed) {
+      console.log(`[Coordinator] Action ${actionId} is already processing or completed. Skipping.`);
+      return;
+    }
+
     // Step 1: Route to CV Agent
     const cvResult = await verifyAction(action.photo_url, action.action_type as ActionType);
 
-    // Step 2: Update action document with CV result
+    // Step 2: Update action document with CV result and rejection reason
     await actionRef.update({
       status: cvResult.verified ? 'verified' : 'rejected',
       confidence: cvResult.confidence,
       detected_label: cvResult.detected_label,
+      rejection_reason: cvResult.verified ? null : cvResult.reason,
       processed_at: admin.firestore.Timestamp.now(),
     });
 
+    console.log(`[CV VALIDATION PIPELINE LOG] Action ${actionId} processed:
+    - Uploaded Image: ${action.photo_url}
+    - Action Type: ${action.action_type}
+    - Predicted Label: ${cvResult.detected_label}
+    - Confidence Score: ${cvResult.confidence}
+    - Validation Result: ${cvResult.verified ? 'VERIFIED' : 'REJECTED'}
+    - Rejection Reason: ${cvResult.verified ? 'N/A' : cvResult.reason}`);
+
     if (!cvResult.verified) {
-      console.log(`Action ${actionId} rejected: ${cvResult.reason}`);
       return;
     }
 
@@ -74,7 +97,10 @@ export async function runCoordinator(
       action.garden_id
     );
 
-    console.log(`Coordinator: Action ${actionId} verified. +${pointsAwarded} pts, streak: ${newStreak}`);
+    console.log(`[REWARD TRIGGER LOG] Action ${actionId} rewarded:
+    - Reward Trigger Reason: Valid AI CV prediction matching action '${action.action_type}'
+    - Points Awarded: ${pointsAwarded} (Base: ${config.points}, Water Boost: ${waterBoost}x)
+    - New Streak: ${newStreak}`);
 
     // Step 5: Check if Waterer notification needed
     const gardenSnap = await gardenRef.get();
@@ -93,8 +119,13 @@ export async function runCoordinator(
     }
 
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
     console.error(`Coordinator error for action ${actionId}:`, error);
-    await actionRef.update({ status: 'rejected', processed_at: admin.firestore.Timestamp.now() });
+    await actionRef.update({
+      status: 'rejected',
+      rejection_reason: `System processing error: ${errorMsg}`,
+      processed_at: admin.firestore.Timestamp.now()
+    });
     throw error;
   }
 }

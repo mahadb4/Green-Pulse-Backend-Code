@@ -10,7 +10,7 @@ export type ActionType =
   | 'compost_waste'
   | 'turn_off_light';
 
-export type ActionStatus = 'pending' | 'verified' | 'rejected';
+export type ActionStatus = 'pending' | 'verifying' | 'approved' | 'rejected' | 'failed';
 
 export interface GardenState {
   garden_health: number;        // 0–100

@@ -32,17 +32,22 @@ export async function verifyAction(
   const model = genai.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
   const systemPrompt = `
-You are a CV verification agent for a children's eco-action app.
-Your job: determine if the submitted photo shows the claimed eco-action.
-Context: Karachi, Pakistan. Images may show Urdu labels, indoor/outdoor settings, varied lighting.
+You are a strict, objective computer vision verification agent for a children's eco-action app.
+Your only job: determine if the submitted photo VERIFIABLY shows the claimed eco-action.
 
+CRITICAL INSTRUCTIONS:
+1. DO NOT GUESS OR ASSUME. If the required objects are not clearly visible, you MUST reject it.
+2. If the image shows an unrelated object (e.g., a laptop, phone screen, random room, person's face, or a ball), you MUST set "verified": false and "confidence": 0.0.
+3. You are defending against users uploading random photos to get free points. Be highly skeptical.
+
+Target Action to Verify:
 ${prompt}
 
 Respond ONLY with this exact JSON structure, no markdown, no extra text:
 {
   "verified": boolean,
-  "confidence": number between 0.0 and 1.0,
-  "detected_label": "what you actually see in the image",
+  "confidence": number between 0.0 and 1.0 (use 0.0 if completely unrelated),
+  "detected_label": "what you actually see in the image (e.g., 'A laptop screen', 'A plastic bottle')",
   "reason": "brief explanation of your decision"
 }
 `;
@@ -61,15 +66,43 @@ Respond ONLY with this exact JSON structure, no markdown, no extra text:
 
   let parsed: CVResult;
   try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error(`CV agent returned invalid JSON: ${text}`);
+    // Strip markdown JSON wrappers if Gemini generated them
+    let cleanText = text;
+    if (cleanText.startsWith('```json')) {
+      cleanText = cleanText.slice(7);
+    } else if (cleanText.startsWith('```')) {
+      cleanText = cleanText.slice(3);
+    }
+    if (cleanText.endsWith('```')) {
+      cleanText = cleanText.slice(0, -3);
+    }
+    cleanText = cleanText.trim();
+
+    parsed = JSON.parse(cleanText);
+  } catch (err) {
+    console.error(`[cvAgent] JSON Parse Error. Raw response: "${text}"`, err);
+    parsed = {
+      verified: false,
+      confidence: 0.0,
+      detected_label: 'unrecognized',
+      reason: 'AI returned invalid JSON response format.'
+    };
   }
 
-  // Apply confidence threshold
-  if (parsed.confidence < config.threshold) {
+  // Handle empty/null/invalid response structure
+  if (!parsed || typeof parsed.verified !== 'boolean' || typeof parsed.confidence !== 'number') {
+    parsed = {
+      verified: false,
+      confidence: 0.0,
+      detected_label: parsed?.detected_label || 'unrecognized',
+      reason: 'AI returned empty, null, or invalid response format.'
+    };
+  }
+
+  // Apply strict confidence threshold
+  if (parsed.verified && parsed.confidence < config.threshold) {
     parsed.verified = false;
-    parsed.reason = `Confidence ${parsed.confidence} below threshold ${config.threshold}`;
+    parsed.reason = `Low confidence detection: ${parsed.confidence} is below strict threshold of ${config.threshold}`;
   }
 
   return parsed;

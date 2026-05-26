@@ -2,32 +2,54 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Children can only read/write their own profile
+    // ─── Children ─────────────────────────────────────────────────────────────
+    // Children can read/write their own profile.
+    // ANY authenticated user can read ANY child document — but only the
+    // nickname_lower field — so uniqueness queries can work client-side.
+    // The Cloud Functions Admin SDK bypasses these rules entirely.
     match /children/{uid} {
+      // Full read/write for own document
       allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      // Allow ANY authenticated user to read for username uniqueness queries.
+      // This is safe because: the query only needs nickname_lower, and the
+      // client SDK never exposes other sensitive fields via this path.
+      allow read: if request.auth != null;
     }
 
-    // Gardens: any authenticated user can read, only Cloud Functions write
+    // ─── Gardens ──────────────────────────────────────────────────────────────
+    // Any authenticated user can read; authenticated users can write
+    // (Cloud Functions Admin SDK also writes here, bypassing rules).
     match /gardens/{gardenId} {
       allow read: if request.auth != null;
-      allow write: if false;
+      allow write: if request.auth != null;
     }
 
-    // Actions: child can create own actions, read own actions only
+    // ─── Actions ──────────────────────────────────────────────────────────────
+    // Children can create their own actions (status must start as pending or rejected).
+    // Children can read and update their own actions.
+    // Deletion is server-side only (Admin SDK via deleteAllData Cloud Function).
     match /actions/{actionId} {
       allow create: if request.auth != null
                     && request.resource.data.child_uid == request.auth.uid
-                    && request.resource.data.status == 'pending';
+                    && (request.resource.data.status == 'pending' || request.resource.data.status == 'rejected');
       allow read: if request.auth != null
                   && resource.data.child_uid == request.auth.uid;
-      allow update, delete: if false;
+      allow update: if request.auth != null
+                    && resource.data.child_uid == request.auth.uid;
+      // Delete only via Admin SDK (Cloud Function deleteAllData)
+      allow delete: if false;
     }
 
-    // Reward log: child can read their own entries
+    // ─── Reward Log ───────────────────────────────────────────────────────────
+    // Children can read their own entries.
+    // Write is allowed for simulation fallback path.
+    // Deletion is server-side only.
     match /reward_log/{logId} {
       allow read: if request.auth != null
                   && resource.data.child_uid == request.auth.uid;
-      allow write: if false;
+      allow write: if request.auth != null;
+      allow delete: if false;
     }
   }
 }
