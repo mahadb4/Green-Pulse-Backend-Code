@@ -3,6 +3,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ActionType, CVResult } from '../types';
 import { ACTION_CONFIG, CV_RESPONSE_TIMEOUT_MS } from '../config/constants';
 
+// Fallback chain — each model has a SEPARATE free-tier quota, so we retry the
+// next one on 429/5xx/timeout. Ordered capable-first, then high daily-quota.
+const CV_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.5-flash'];
+
 const CV_PROMPTS: Record<ActionType, string> = {
   recycle_bottle:  'Look for a PLASTIC drink bottle (e.g. a clear or coloured water/soda PET bottle, with or without its cap). The plastic bottle is itself the recyclable item — a recycling bin is NOT required in the photo. Verify TRUE whenever a plastic bottle is clearly visible. Reject only if there is no plastic bottle (for example a glass, ceramic mug, metal can, or an unrelated object/person). Return JSON only.',
   plant_seed:      'Look for planting activity or a young plant: seeds, a seedling or sapling, disturbed soil, a dug hole, hands planting, or a small plant in soil or a pot. Verify TRUE if any of these are clearly visible. Return JSON only.',
@@ -29,7 +33,6 @@ export async function verifyAction(
   const base64Image = imageBuffer.toString('base64');
 
   const genai = new GoogleGenerativeAI(apiKey);
-  const model = genai.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
   const systemPrompt = `
 You are a strict, objective computer vision verification agent for a children's eco-action app.
@@ -52,17 +55,36 @@ Respond ONLY with this exact JSON structure, no markdown, no extra text:
 }
 `;
 
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('CV agent timeout')), CV_RESPONSE_TIMEOUT_MS)
-  );
-
-  const cvPromise = model.generateContent([
+  const requestParts = [
     systemPrompt,
     { inlineData: { data: base64Image, mimeType: 'image/jpeg' } },
-  ]);
+  ];
 
-  const result = await Promise.race([cvPromise, timeoutPromise]);
-  const text = result.response.text().trim();
+  // Each model has its OWN free-tier quota bucket, so a 429 (or transient 5xx /
+  // timeout) on one model falls through to the next. Order: capable → high-quota.
+  let text = '';
+  let lastErr: unknown;
+  for (const modelName of CV_MODELS) {
+    try {
+      const model = genai.getGenerativeModel({ model: modelName });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('CV agent timeout')), CV_RESPONSE_TIMEOUT_MS)
+      );
+      const result: any = await Promise.race([
+        model.generateContent(requestParts as any),
+        timeoutPromise,
+      ]);
+      text = result.response.text().trim();
+      if (text) break;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[cvAgent] model ${modelName} failed: ${err instanceof Error ? err.message : String(err)}`);
+      // try the next model in the fallback chain
+    }
+  }
+  if (!text) {
+    throw lastErr instanceof Error ? lastErr : new Error('All CV models unavailable');
+  }
 
   let parsed: CVResult;
   try {
