@@ -4,12 +4,12 @@ import { ActionType, CVResult } from '../types';
 import { ACTION_CONFIG, CV_RESPONSE_TIMEOUT_MS } from '../config/constants';
 
 const CV_PROMPTS: Record<ActionType, string> = {
-  recycle_bottle:  'Look for a plastic bottle being placed into or near a recycling bin. Both the bottle AND recycling bin must be clearly visible. Return JSON only.',
-  plant_seed:      'Look for a freshly planted seed or small sapling in soil. Soil disturbance or a small plant emerging from ground must be visible. Return JSON only.',
-  water_plant:     'Look for a watering can, bottle, or hose actively watering a visible plant. Both the water source and plant must be present. Return JSON only.',
-  pick_litter:     'This is a before/after pair. In the before image, litter should be visible. In the after, the same scene should be cleaner. Assess the pair together. Return JSON only.',
-  compost_waste:   'Look for food scraps, organic waste, or vegetable matter being placed into a compost bin or compost pile. Return JSON only.',
-  turn_off_light:  'Look for a light switch in the OFF position in a clearly unlit room. The room must appear dark/unlit. High false-positive risk — be strict. Return JSON only.',
+  recycle_bottle:  'Look for a PLASTIC drink bottle (e.g. a clear or coloured water/soda PET bottle, with or without its cap). The plastic bottle is itself the recyclable item — a recycling bin is NOT required in the photo. Verify TRUE whenever a plastic bottle is clearly visible. Reject only if there is no plastic bottle (for example a glass, ceramic mug, metal can, or an unrelated object/person). Return JSON only.',
+  plant_seed:      'Look for planting activity or a young plant: seeds, a seedling or sapling, disturbed soil, a dug hole, hands planting, or a small plant in soil or a pot. Verify TRUE if any of these are clearly visible. Return JSON only.',
+  water_plant:     'Look for a real plant or greenery TOGETHER WITH a water source (watering can, bottle, hose, jug or cup), or a plant that is clearly being watered. Verify TRUE if both a plant and a plausible water source are visible. Return JSON only.',
+  pick_litter:     'Look for litter being collected or cleaned up: trash held in a hand or bag, litter gathered for disposal, or (if two images are given) an after scene that is visibly cleaner than the before. Verify TRUE if litter collection is evident. Return JSON only.',
+  compost_waste:   'Look for food scraps or organic waste (fruit or vegetable peels, leftovers, garden trimmings) being composted or placed for compost. A compost bin helps but is NOT required. Verify TRUE if organic/food waste is clearly visible. Return JSON only.',
+  turn_off_light:  'Look for a light switch in the OFF position, ideally in a dim or unlit room. Verify TRUE if an off light switch is clearly visible. Return JSON only.',
 };
 
 export async function verifyAction(
