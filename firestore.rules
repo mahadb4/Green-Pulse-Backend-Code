@@ -41,6 +41,13 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ─── Parent TOTP secrets ──────────────────────────────────────────────────
+    // Server-only. The Admin SDK (Cloud Functions) bypasses these rules; no client
+    // — including the child — may ever read or write a parent's authenticator secret.
+    match /parent_secrets/{uid} {
+      allow read, write: if false;
+    }
+
     // ─── Reward Log ───────────────────────────────────────────────────────────
     // Children can read their own entries.
     // Write is allowed for simulation fallback path.

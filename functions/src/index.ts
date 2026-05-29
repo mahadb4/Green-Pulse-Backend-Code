@@ -6,6 +6,10 @@ import { runCoordinator } from './agents/coordinator';
 import { runDecayAgent } from './agents/decayAgent';
 import { ActionDocument, Building } from './types';
 import { BUILDING_COSTS, BUILDING_REFUND_RATE } from './config/constants';
+import { authenticator } from 'otplib';
+
+// Allow ±1 time-step (30s) drift so codes from Google Authenticator / Authy verify reliably.
+authenticator.options = { window: 1 };
 
 // Initialize Firebase Admin SDK (only once)
 if (!admin.apps.length) {
@@ -251,6 +255,69 @@ export const removeBuilding = onCall(
     });
 
     return { success: true, ...result };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALLABLE v2: Set up parent TOTP (Google Authenticator / Authy)
+// Generates (or returns existing) a TOTP secret stored server-side only in
+// `parent_secrets/{uid}` (clients can never read it — see firestore.rules).
+// Returns the otpauth:// URL + secret so the app can render an enrolment QR.
+// ─────────────────────────────────────────────────────────────────────────────
+export const setupParentTotp = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be signed in.');
+    const uid = request.auth.uid;
+    const db = admin.firestore();
+    const secretRef = db.collection('parent_secrets').doc(uid);
+    const childRef = db.collection('children').doc(uid);
+
+    const [secretSnap, childSnap] = await Promise.all([secretRef.get(), childRef.get()]);
+    const child = childSnap.exists ? (childSnap.data() as any) : {};
+    const account = child?.parent_email || child?.nickname || `child-${uid.slice(0, 6)}`;
+
+    let secret: string;
+    let alreadyEnrolled = false;
+    if (secretSnap.exists && secretSnap.data()?.secret) {
+      secret = secretSnap.data()!.secret;
+      alreadyEnrolled = true;
+    } else {
+      secret = authenticator.generateSecret();
+      await secretRef.set({ secret, created_at: admin.firestore.Timestamp.now() });
+    }
+
+    const otpauthUrl = authenticator.keyuri(String(account), 'GreenPulse', secret);
+    return { secret, otpauthUrl, alreadyEnrolled };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALLABLE v2: Verify a parent TOTP code (from the authenticator app)
+// purpose 'consent' also flips parent_approved = true on success.
+// ─────────────────────────────────────────────────────────────────────────────
+export const verifyParentTotp = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be signed in.');
+    const uid = request.auth.uid;
+    const { code, purpose } = request.data as { code: string; purpose?: string };
+    if (!code || !/^[0-9]{6}$/.test(String(code))) {
+      throw new HttpsError('invalid-argument', 'Enter the 6-digit code from your authenticator app.');
+    }
+
+    const db = admin.firestore();
+    const secretSnap = await db.collection('parent_secrets').doc(uid).get();
+    const secret = secretSnap.exists ? secretSnap.data()?.secret : null;
+    if (!secret) {
+      throw new HttpsError('failed-precondition', 'Authenticator is not set up yet.');
+    }
+
+    const valid = authenticator.verify({ token: String(code), secret });
+    if (valid && purpose === 'consent') {
+      await db.collection('children').doc(uid).set({ parent_approved: true }, { merge: true });
+    }
+    return { valid };
   }
 );
 
