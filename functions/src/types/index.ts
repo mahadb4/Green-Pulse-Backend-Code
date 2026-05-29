@@ -2,6 +2,20 @@ import * as admin from 'firebase-admin';
 
 export type GardenStage = 'barren' | 'seedling' | 'sapling' | 'tree' | 'forest';
 
+// World cleanup progression (drives the 3D world): 0 = polluted wasteland, 100 = pristine eco-city.
+export type WorldStage = 'wasteland' | 'polluted' | 'recovering' | 'clean' | 'eco_city';
+
+// Two game phases: clean the polluted world, then build a pollution-free city on it.
+export type WorldPhase = 'cleanup' | 'building';
+
+export interface Building {
+  id: string;
+  type: string;            // e.g. 'house', 'park', 'solar_plant', 'windmill'
+  x: number;               // grid coordinates in the 3D world
+  z: number;
+  placed_at: admin.firestore.Timestamp;
+}
+
 export type ActionType =
   | 'recycle_bottle'
   | 'plant_seed'
@@ -13,13 +27,19 @@ export type ActionType =
 export type ActionStatus = 'pending' | 'verifying' | 'verified' | 'approved' | 'rejected' | 'failed';
 
 export interface GardenState {
-  garden_health: number;        // 0–100
+  garden_health: number;        // 0–100  (legacy garden metric, kept for back-compat)
   garden_stage: GardenStage;
   water_level: number;          // 0–100
   nutrient_level: number;       // 0–100
   action_queue: string[];       // array of action IDs pending processing
   member_count: number;
   created_at: admin.firestore.Timestamp;
+
+  // ─── World cleanup + city builder (new core mechanic) ───────────────────────
+  cleanliness: number;          // 0–100, raised by verified eco-actions
+  world_stage: WorldStage;      // derived from cleanliness
+  phase: WorldPhase;            // 'cleanup' until cleanliness hits 100, then 'building'
+  buildings: Building[];        // city placed in the building phase
 }
 
 export interface ChildState {
@@ -55,5 +75,6 @@ export interface ActionConfig {
   nutrient: number;
   water: number;
   health: number;
+  cleanliness: number;          // how much this action cleans the world (0–100 scale)
   threshold: number;            // minimum confidence to verify
 }

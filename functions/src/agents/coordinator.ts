@@ -3,8 +3,14 @@ import { verifyAction } from './cvAgent';
 import { runRewardAgent } from './rewardAgent';
 import { getWatererMultiplier, sendThirstyNotification } from './watererAgent';
 import { ActionDocument, ActionType, GardenState } from '../types';
-import { ACTION_CONFIG, WATERER_THRESHOLD, GARDEN_STAGE_THRESHOLDS } from '../config/constants';
-import { GardenStage } from '../types';
+import {
+  ACTION_CONFIG,
+  WATERER_THRESHOLD,
+  GARDEN_STAGE_THRESHOLDS,
+  WORLD_STAGE_THRESHOLDS,
+  CLEANLINESS_MAX,
+} from '../config/constants';
+import { GardenStage, WorldStage, WorldPhase } from '../types';
 
 function calculateStage(health: number): GardenStage {
   for (const [stage, range] of Object.entries(GARDEN_STAGE_THRESHOLDS)) {
@@ -13,6 +19,15 @@ function calculateStage(health: number): GardenStage {
     }
   }
   return 'barren';
+}
+
+function calculateWorldStage(cleanliness: number): WorldStage {
+  for (const [stage, range] of Object.entries(WORLD_STAGE_THRESHOLDS)) {
+    if (cleanliness >= range.min && cleanliness <= range.max) {
+      return stage as WorldStage;
+    }
+  }
+  return 'wasteland';
 }
 
 export async function runCoordinator(
@@ -81,13 +96,29 @@ export async function runCoordinator(
       const newNutrient = Math.min(100, garden.nutrient_level + config.nutrient);
       const newStage = calculateStage(newHealth);
 
+      // ─── World cleanup progression ──────────────────────────────────────────
+      // Verified eco-actions clean the polluted world. waterBoost also rewards
+      // water actions during a drought so progress stays dynamic per garden.
+      const cleanlinessGain = config.cleanliness * (action.action_type === 'water_plant' ? waterBoost : 1.0);
+      const prevCleanliness = garden.cleanliness ?? 0;
+      const newCleanliness = Math.min(CLEANLINESS_MAX, prevCleanliness + cleanlinessGain);
+      const newWorldStage = calculateWorldStage(newCleanliness);
+      // Unlock the city-builder once the world is fully cleaned; never regress out of it.
+      const newPhase: WorldPhase =
+        newCleanliness >= CLEANLINESS_MAX || garden.phase === 'building' ? 'building' : 'cleanup';
+
       tx.update(gardenRef, {
         garden_health: newHealth,
         water_level: newWater,
         nutrient_level: newNutrient,
         garden_stage: newStage,
+        cleanliness: newCleanliness,
+        world_stage: newWorldStage,
+        phase: newPhase,
         action_queue: admin.firestore.FieldValue.arrayRemove(actionId),
       });
+
+      console.log(`[WORLD CLEANUP LOG] Garden ${action.garden_id}: cleanliness ${prevCleanliness} → ${newCleanliness} (+${cleanlinessGain}), stage=${newWorldStage}, phase=${newPhase}`);
     });
 
     // Step 4: Dispatch Reward Agent

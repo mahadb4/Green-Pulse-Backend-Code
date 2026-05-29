@@ -4,7 +4,8 @@ import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { runCoordinator } from './agents/coordinator';
 import { runDecayAgent } from './agents/decayAgent';
-import { ActionDocument } from './types';
+import { ActionDocument, Building } from './types';
+import { BUILDING_COSTS, BUILDING_REFUND_RATE } from './config/constants';
 
 // Initialize Firebase Admin SDK (only once)
 if (!admin.apps.length) {
@@ -163,6 +164,93 @@ export const deleteAllData = onCall(
 
     console.log(`[deleteAllData] ✅ All data deleted for user ${uid}`);
     return { success: true, message: 'All data deleted.' };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALLABLE v2: Place a building in the eco-city (authoritative — spends energy points)
+// ─────────────────────────────────────────────────────────────────────────────
+export const placeBuilding = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be signed in.');
+    const uid = request.auth.uid;
+    const { garden_id, type, x, z } = request.data as {
+      garden_id: string; type: string; x: number; z: number;
+    };
+    if (!garden_id || !type || typeof x !== 'number' || typeof z !== 'number') {
+      throw new HttpsError('invalid-argument', 'Missing required fields.');
+    }
+    const cost = BUILDING_COSTS[type];
+    if (cost === undefined) throw new HttpsError('invalid-argument', 'Unknown building type.');
+
+    const db = admin.firestore();
+    const result = await db.runTransaction(async (tx) => {
+      const childRef = db.collection('children').doc(uid);
+      const gardenRef = db.collection('gardens').doc(garden_id);
+      const childSnap = await tx.get(childRef);
+      const gardenSnap = await tx.get(gardenRef);
+      if (!childSnap.exists) throw new HttpsError('not-found', 'Profile not found.');
+      if (!gardenSnap.exists) throw new HttpsError('not-found', 'World not found.');
+
+      const child = childSnap.data() as any;
+      const garden = gardenSnap.data() as any;
+      if (garden.phase !== 'building') {
+        throw new HttpsError('failed-precondition', 'Fully clean your world to unlock building.');
+      }
+      const points = child.energy_points ?? 0;
+      if (points < cost) {
+        throw new HttpsError('failed-precondition', `Need ${cost} energy points — you have ${points}.`);
+      }
+      const buildings: Building[] = Array.isArray(garden.buildings) ? garden.buildings : [];
+      if (buildings.some((b) => b.x === x && b.z === z)) {
+        throw new HttpsError('already-exists', 'That spot is already taken.');
+      }
+
+      const newBuilding: Building = {
+        id: `${type}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        type, x, z,
+        placed_at: admin.firestore.Timestamp.now(),
+      };
+      tx.update(gardenRef, { buildings: [...buildings, newBuilding] });
+      tx.update(childRef, { energy_points: admin.firestore.FieldValue.increment(-cost) });
+      return { building: newBuilding, remainingPoints: points - cost };
+    });
+
+    return { success: true, ...result };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALLABLE v2: Remove a building (bulldoze) — refunds half the cost
+// ─────────────────────────────────────────────────────────────────────────────
+export const removeBuilding = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be signed in.');
+    const uid = request.auth.uid;
+    const { garden_id, building_id } = request.data as { garden_id: string; building_id: string };
+    if (!garden_id || !building_id) throw new HttpsError('invalid-argument', 'Missing required fields.');
+
+    const db = admin.firestore();
+    const result = await db.runTransaction(async (tx) => {
+      const childRef = db.collection('children').doc(uid);
+      const gardenRef = db.collection('gardens').doc(garden_id);
+      const gardenSnap = await tx.get(gardenRef);
+      if (!gardenSnap.exists) throw new HttpsError('not-found', 'World not found.');
+
+      const garden = gardenSnap.data() as any;
+      const buildings: Building[] = Array.isArray(garden.buildings) ? garden.buildings : [];
+      const target = buildings.find((b) => b.id === building_id);
+      if (!target) throw new HttpsError('not-found', 'Building not found.');
+
+      const refund = Math.floor((BUILDING_COSTS[target.type] ?? 0) * BUILDING_REFUND_RATE);
+      tx.update(gardenRef, { buildings: buildings.filter((b) => b.id !== building_id) });
+      if (refund > 0) tx.update(childRef, { energy_points: admin.firestore.FieldValue.increment(refund) });
+      return { refund };
+    });
+
+    return { success: true, ...result };
   }
 );
 

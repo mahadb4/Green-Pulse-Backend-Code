@@ -4,9 +4,10 @@ import {
   WATER_CONSUME_PER_MEMBER,
   NUTRIENT_CONSUME_PER_MEMBER,
   HEALTH_ALERT_THRESHOLD,
+  CLEANLINESS_DECAY_PER_DAY,
 } from '../config/constants';
-import { GardenState, GardenStage } from '../types';
-import { GARDEN_STAGE_THRESHOLDS } from '../config/constants';
+import { GardenState, GardenStage, WorldStage } from '../types';
+import { GARDEN_STAGE_THRESHOLDS, WORLD_STAGE_THRESHOLDS } from '../config/constants';
 
 function calculateStage(health: number): GardenStage {
   for (const [stage, range] of Object.entries(GARDEN_STAGE_THRESHOLDS)) {
@@ -15,6 +16,15 @@ function calculateStage(health: number): GardenStage {
     }
   }
   return 'barren';
+}
+
+function calculateWorldStage(cleanliness: number): WorldStage {
+  for (const [stage, range] of Object.entries(WORLD_STAGE_THRESHOLDS)) {
+    if (cleanliness >= range.min && cleanliness <= range.max) {
+      return stage as WorldStage;
+    }
+  }
+  return 'wasteland';
 }
 
 export async function runDecayAgent(): Promise<void> {
@@ -33,11 +43,18 @@ export async function runDecayAgent(): Promise<void> {
     const newNutrient = Math.max(0, nutrient_level - (NUTRIENT_CONSUME_PER_MEMBER * member_count));
     const newStage = calculateStage(newHealth);
 
+    // Pollution creeps back: cleanliness decays daily (phase is never downgraded).
+    const prevCleanliness = garden.cleanliness ?? 0;
+    const newCleanliness = Math.max(0, prevCleanliness - CLEANLINESS_DECAY_PER_DAY);
+    const newWorldStage = calculateWorldStage(newCleanliness);
+
     batch.update(doc.ref, {
       garden_health: newHealth,
       water_level: newWater,
       nutrient_level: newNutrient,
       garden_stage: newStage,
+      cleanliness: newCleanliness,
+      world_stage: newWorldStage,
     });
 
     if (newHealth < HEALTH_ALERT_THRESHOLD) {

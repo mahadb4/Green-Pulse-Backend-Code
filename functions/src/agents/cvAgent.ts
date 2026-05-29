@@ -29,7 +29,7 @@ export async function verifyAction(
   const base64Image = imageBuffer.toString('base64');
 
   const genai = new GoogleGenerativeAI(apiKey);
-  const model = genai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const model = genai.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
   const systemPrompt = `
 You are a strict, objective computer vision verification agent for a children's eco-action app.
