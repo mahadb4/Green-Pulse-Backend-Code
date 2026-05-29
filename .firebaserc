@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "greenpulse-dev"
-  }
+    "default": "greenpulse-dev",
+    "dev": "greenpulse-dev-63b4b"
+  },
+  "targets": {},
+  "etags": {}
 }

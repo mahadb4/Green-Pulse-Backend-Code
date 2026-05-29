@@ -24,15 +24,16 @@ npm install @react-native-firebase/messaging
 
 Download config files from **Firebase Console → Project Settings → Your Apps**:
 
-| Platform | Config File | Place In |
-|----------|------------|----------|
-| Android | `google-services.json` | `android/app/google-services.json` |
-| iOS | `GoogleService-Info.plist` | `ios/YourApp/GoogleService-Info.plist` |
+| Platform | Config File                | Place In                               |
+| -------- | -------------------------- | -------------------------------------- |
+| Android  | `google-services.json`     | `android/app/google-services.json`     |
+| iOS      | `GoogleService-Info.plist` | `ios/YourApp/GoogleService-Info.plist` |
 
 > **How does React Native know which backend to connect to?**  
 > These config files contain the unique project ID (`greenpulse-dev-63b4b`), API keys, and app IDs. Once placed correctly, ALL Firebase SDK calls automatically route to the correct project. No manual URLs needed.
 
 If the app isn't registered yet:
+
 1. Go to https://console.firebase.google.com/project/greenpulse-dev-63b4b/settings/general
 2. Click **"Add app"** → Select Android or iOS
 3. Enter your app's package name / bundle ID
@@ -44,11 +45,11 @@ If the app isn't registered yet:
 
 There are **NO REST APIs**. Communication happens through three Firebase mechanisms:
 
-| Mechanism | When to Use |
-|-----------|------------|
-| **Callable Functions** | Triggering backend actions (submit photo, delete data, get garden) |
-| **Firestore Listeners** | Real-time UI updates (garden state, child profile, action status) |
-| **FCM Push Notifications** | Alerts from the Decay and Waterer agents |
+| Mechanism                  | When to Use                                                        |
+| -------------------------- | ------------------------------------------------------------------ |
+| **Callable Functions**     | Triggering backend actions (submit photo, delete data, get garden) |
+| **Firestore Listeners**    | Real-time UI updates (garden state, child profile, action status)  |
+| **FCM Push Notifications** | Alerts from the Decay and Waterer agents                           |
 
 ---
 
@@ -57,7 +58,7 @@ There are **NO REST APIs**. Communication happens through three Firebase mechani
 The app uses **Firebase Anonymous Auth** (COPPA-safe — no PII collected from children).
 
 ```javascript
-import auth from '@react-native-firebase/auth';
+import auth from "@react-native-firebase/auth";
 
 // Sign in anonymously
 const userCredential = await auth().signInAnonymously();
@@ -67,10 +68,10 @@ const uid = userCredential.user.uid;
 After first sign-in, create the child document in Firestore:
 
 ```javascript
-import firestore from '@react-native-firebase/firestore';
+import firestore from "@react-native-firebase/firestore";
 
 const uid = auth().currentUser.uid;
-const childRef = firestore().collection('children').doc(uid);
+const childRef = firestore().collection("children").doc(uid);
 const childSnap = await childRef.get();
 
 if (!childSnap.exists) {
@@ -79,7 +80,7 @@ if (!childSnap.exists) {
     current_streak: 0,
     parent_approved: false,
     nickname: null,
-    garden_id: 'garden_karachi_01',  // assign to a garden
+    garden_id: "garden_karachi_01", // assign to a garden
     last_action_at: null,
     fcm_token: null,
   });
@@ -95,10 +96,10 @@ if (!childSnap.exists) {
 These are the 3 backend endpoints. Call them using `@react-native-firebase/functions`.
 
 ```javascript
-import functions from '@react-native-firebase/functions';
+import functions from "@react-native-firebase/functions";
 
 // IMPORTANT: Set the region to match the backend
-const fn = functions().httpsCallable('functionName');
+const fn = functions().httpsCallable("functionName");
 // OR if you need to specify region:
 // const fn = firebase.app().functions('us-central1').httpsCallable('functionName');
 ```
@@ -110,13 +111,13 @@ const fn = functions().httpsCallable('functionName');
 Called after the child takes a photo. **Photo must be uploaded to Storage first** (see Section 6).
 
 ```javascript
-const submitAction = functions().httpsCallable('submitAction');
+const submitAction = functions().httpsCallable("submitAction");
 
 try {
   const result = await submitAction({
-    action_type: 'recycle_bottle',     // see Action Types below
-    photo_url: photoDownloadUrl,        // Firebase Storage download URL
-    garden_id: 'garden_karachi_01',     // the child's garden ID
+    action_type: "recycle_bottle", // see Action Types below
+    photo_url: photoDownloadUrl, // Firebase Storage download URL
+    garden_id: "garden_karachi_01", // the child's garden ID
   });
 
   console.log(result.data);
@@ -135,22 +136,22 @@ try {
 
 **Action Types (use exactly these strings):**
 
-| Action Type | Description | Points |
-|-------------|-------------|--------|
-| `recycle_bottle` | Plastic bottle in/near recycling bin | 10 |
-| `plant_seed` | Freshly planted seed or sapling | 20 |
-| `water_plant` | Watering a plant with can/hose/bottle | 6 |
-| `pick_litter` | Before/after litter cleanup | 15 |
-| `compost_waste` | Food scraps into compost bin | 18 |
-| `turn_off_light` | Light switch OFF in unlit room | 5 |
+| Action Type      | Description                           | Points |
+| ---------------- | ------------------------------------- | ------ |
+| `recycle_bottle` | Plastic bottle in/near recycling bin  | 10     |
+| `plant_seed`     | Freshly planted seed or sapling       | 20     |
+| `water_plant`    | Watering a plant with can/hose/bottle | 6      |
+| `pick_litter`    | Before/after litter cleanup           | 15     |
+| `compost_waste`  | Food scraps into compost bin          | 18     |
+| `turn_off_light` | Light switch OFF in unlit room        | 5      |
 
 **Error Codes:**
 
-| Code | Meaning | UI Action |
-|------|---------|-----------|
-| `unauthenticated` | User not signed in | Redirect to sign-in |
-| `invalid-argument` | Missing `action_type`, `photo_url`, or `garden_id` | Show validation error |
-| `permission-denied` | `parent_approved` is `false` | Show "Waiting for parent approval" |
+| Code                | Meaning                                            | UI Action                          |
+| ------------------- | -------------------------------------------------- | ---------------------------------- |
+| `unauthenticated`   | User not signed in                                 | Redirect to sign-in                |
+| `invalid-argument`  | Missing `action_type`, `photo_url`, or `garden_id` | Show validation error              |
+| `permission-denied` | `parent_approved` is `false`                       | Show "Waiting for parent approval" |
 
 ---
 
@@ -159,10 +160,10 @@ try {
 Can also use a Firestore listener instead (recommended for real-time updates).
 
 ```javascript
-const getGardenState = functions().httpsCallable('getGardenState');
+const getGardenState = functions().httpsCallable("getGardenState");
 
 const result = await getGardenState({
-  garden_id: 'garden_karachi_01',
+  garden_id: "garden_karachi_01",
 });
 
 console.log(result.data);
@@ -176,7 +177,7 @@ console.log(result.data);
 Called from the **parent dashboard** to delete all child data.
 
 ```javascript
-const deleteAllData = functions().httpsCallable('deleteAllData');
+const deleteAllData = functions().httpsCallable("deleteAllData");
 
 const result = await deleteAllData();
 
@@ -188,6 +189,7 @@ await auth().signOut();
 ```
 
 > ⚠️ **This is irreversible.** It deletes:
+>
 > - Child's Firestore profile
 > - All action documents
 > - All photos from Storage
@@ -204,21 +206,21 @@ Use these for live UI updates — **do NOT poll the callable functions**.
 **Path:** `gardens/{gardenId}`
 
 ```javascript
-import firestore from '@react-native-firebase/firestore';
+import firestore from "@react-native-firebase/firestore";
 
 useEffect(() => {
   const unsubscribe = firestore()
-    .collection('gardens')
-    .doc('garden_karachi_01')
+    .collection("gardens")
+    .doc("garden_karachi_01")
     .onSnapshot((snapshot) => {
       const data = snapshot.data();
 
-      const health     = data.garden_health;    // 0–100 (number)
-      const stage      = data.garden_stage;     // string, see stages below
-      const waterLevel = data.water_level;      // 0–100 (number)
-      const nutrient   = data.nutrient_level;   // 0–100 (number)
-      const queue      = data.action_queue;     // array of pending action IDs
-      const members    = data.member_count;     // number
+      const health = data.garden_health; // 0–100 (number)
+      const stage = data.garden_stage; // string, see stages below
+      const waterLevel = data.water_level; // 0–100 (number)
+      const nutrient = data.nutrient_level; // 0–100 (number)
+      const queue = data.action_queue; // array of pending action IDs
+      const members = data.member_count; // number
 
       // Update your garden UI + Zara based on these values
     });
@@ -229,13 +231,13 @@ useEffect(() => {
 
 **Garden Stages (drives Zara's visual state):**
 
-| Stage | Health Range | Visual |
-|-------|-------------|--------|
-| `barren` | 0–19 | Dead/empty plot |
-| `seedling` | 20–39 | Small sprout |
-| `sapling` | 40–59 | Young tree |
-| `tree` | 60–79 | Full tree |
-| `forest` | 80–100 | Lush forest, Zara celebrating |
+| Stage      | Health Range | Visual                        |
+| ---------- | ------------ | ----------------------------- |
+| `barren`   | 0–19         | Dead/empty plot               |
+| `seedling` | 20–39        | Small sprout                  |
+| `sapling`  | 40–59        | Young tree                    |
+| `tree`     | 60–79        | Full tree                     |
+| `forest`   | 80–100       | Lush forest, Zara celebrating |
 
 ---
 
@@ -248,16 +250,16 @@ useEffect(() => {
   const uid = auth().currentUser.uid;
 
   const unsubscribe = firestore()
-    .collection('children')
+    .collection("children")
     .doc(uid)
     .onSnapshot((snapshot) => {
       const data = snapshot.data();
 
-      const points         = data.energy_points;     // number
-      const streak         = data.current_streak;     // number
-      const parentApproved = data.parent_approved;    // boolean
-      const nickname       = data.nickname;           // string | null
-      const gardenId       = data.garden_id;          // string
+      const points = data.energy_points; // number
+      const streak = data.current_streak; // number
+      const parentApproved = data.parent_approved; // boolean
+      const nickname = data.nickname; // string | null
+      const gardenId = data.garden_id; // string
     });
 
   return () => unsubscribe();
@@ -315,8 +317,8 @@ Photos **must be uploaded to Storage BEFORE calling `submitAction`**. The backen
 **Storage Path:** `action-photos/{uid}/{photoId}`
 
 ```javascript
-import storage from '@react-native-firebase/storage';
-import auth from '@react-native-firebase/auth';
+import storage from "@react-native-firebase/storage";
+import auth from "@react-native-firebase/auth";
 
 async function uploadActionPhoto(photoUri) {
   const uid = auth().currentUser.uid;
@@ -327,7 +329,7 @@ async function uploadActionPhoto(photoUri) {
 
   // Upload the file
   await ref.putFile(photoUri, {
-    contentType: 'image/jpeg',
+    contentType: "image/jpeg",
   });
 
   // Get download URL to pass to submitAction
@@ -343,6 +345,7 @@ async function uploadActionPhoto(photoUri) {
 ```
 
 **Storage Rules (already deployed):**
+
 - Max file size: **5 MB**
 - Only images allowed (`image/*`)
 - Users can only upload to their own folder
@@ -360,9 +363,9 @@ The backend sends push notifications when the garden needs attention.
 After sign-in, save the device's FCM token to the child document:
 
 ```javascript
-import messaging from '@react-native-firebase/messaging';
-import firestore from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
+import messaging from "@react-native-firebase/messaging";
+import firestore from "@react-native-firebase/firestore";
+import auth from "@react-native-firebase/auth";
 
 // Request permission (required on iOS)
 await messaging().requestPermission();
@@ -371,15 +374,12 @@ await messaging().requestPermission();
 const token = await messaging().getToken();
 const uid = auth().currentUser.uid;
 
-await firestore()
-  .collection('children')
-  .doc(uid)
-  .update({ fcm_token: token });
+await firestore().collection("children").doc(uid).update({ fcm_token: token });
 
 // Listen for token refresh
 messaging().onTokenRefresh(async (newToken) => {
   await firestore()
-    .collection('children')
+    .collection("children")
     .doc(uid)
     .update({ fcm_token: newToken });
 });
@@ -394,9 +394,9 @@ Notifications include a `data` payload with Zara's state:
 messaging().onMessage(async (remoteMessage) => {
   const { data } = remoteMessage;
 
-  if (data.type === 'zara_state') {
-    const zaraState = data.zara_state;  // 'thirsty' | 'sad'
-    const gardenId  = data.garden_id;
+  if (data.type === "zara_state") {
+    const zaraState = data.zara_state; // 'thirsty' | 'sad'
+    const gardenId = data.garden_id;
 
     // Update Zara's animation based on state
   }
@@ -405,18 +405,18 @@ messaging().onMessage(async (remoteMessage) => {
 // Background / killed state notifications
 messaging().setBackgroundMessageHandler(async (remoteMessage) => {
   // Handle background notification
-  console.log('Background message:', remoteMessage);
+  console.log("Background message:", remoteMessage);
 });
 ```
 
 ### 7.3 Zara State Mapping
 
-| FCM `zara_state` | Trigger | Zara Animation | Notification Text |
-|-------------------|---------|----------------|-------------------|
-| `thirsty` | `water_level < 20` | Tongue out, dry texture | "🌵 Zara is thirsty! Your garden needs water." |
-| `sad` | `garden_health < 30` | Droops, rain cloud | "🌧️ Zara is sad! Your garden needs help!" |
-| `happy` | Action verified | Jumps, sparkles | *(via Firestore listener, not FCM)* |
-| `celebrating` | `garden_stage === 'forest'` | Crown, Ajrak coat glows | *(via Firestore listener)* |
+| FCM `zara_state` | Trigger                     | Zara Animation          | Notification Text                              |
+| ---------------- | --------------------------- | ----------------------- | ---------------------------------------------- |
+| `thirsty`        | `water_level < 20`          | Tongue out, dry texture | "🌵 Zara is thirsty! Your garden needs water." |
+| `sad`            | `garden_health < 30`        | Droops, rain cloud      | "🌧️ Zara is sad! Your garden needs help!"      |
+| `happy`          | Action verified             | Jumps, sparkles         | _(via Firestore listener, not FCM)_            |
+| `celebrating`    | `garden_stage === 'forest'` | Crown, Ajrak coat glows | _(via Firestore listener)_                     |
 
 ---
 
@@ -470,6 +470,7 @@ messaging().setBackgroundMessageHandler(async (remoteMessage) => {
 ## 9. Firestore Data Structures (Reference)
 
 ### `gardens/{gardenId}`
+
 ```json
 {
   "garden_health": 30,
@@ -483,6 +484,7 @@ messaging().setBackgroundMessageHandler(async (remoteMessage) => {
 ```
 
 ### `children/{uid}`
+
 ```json
 {
   "energy_points": 0,
@@ -496,6 +498,7 @@ messaging().setBackgroundMessageHandler(async (remoteMessage) => {
 ```
 
 ### `actions/{actionId}`
+
 ```json
 {
   "child_uid": "user_uid_here",
@@ -511,6 +514,7 @@ messaging().setBackgroundMessageHandler(async (remoteMessage) => {
 ```
 
 ### `reward_log/{logId}` (read-only, for parent dashboard)
+
 ```json
 {
   "child_uid": "user_uid_here",
@@ -529,10 +533,10 @@ messaging().setBackgroundMessageHandler(async (remoteMessage) => {
 
 These documents exist in the dev environment for testing:
 
-| Collection | Document ID | Notes |
-|-----------|-------------|-------|
-| `gardens` | `garden_karachi_01` | health: 30, water: 50, stage: seedling |
-| `children` | `test_child_001` | parent_approved: true, linked to garden_karachi_01 |
+| Collection | Document ID         | Notes                                              |
+| ---------- | ------------------- | -------------------------------------------------- |
+| `gardens`  | `garden_karachi_01` | health: 30, water: 50, stage: seedling             |
+| `children` | `test_child_001`    | parent_approved: true, linked to garden_karachi_01 |
 
 ---
 
