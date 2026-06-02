@@ -1,11 +1,15 @@
 import * as admin from 'firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ActionType, CVResult } from '../types';
-import { ACTION_CONFIG, CV_RESPONSE_TIMEOUT_MS } from '../config/constants';
+import { ACTION_CONFIG, CV_RESPONSE_TIMEOUT_MS, AUTHENTICITY_THRESHOLD } from '../config/constants';
 
 // Fallback chain — each model has a SEPARATE free-tier quota, so we retry the
-// next one on 429/5xx/timeout. Ordered capable-first, then high daily-quota.
-const CV_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.5-flash'];
+// next one on 429/5xx/timeout. Ordered fastest-working-first:
+//   gemini-2.5-flash    — verified fast (~1–2s) and capable → primary
+//   gemini-2.5-flash-lite — works but slower (~6s+), used only if flash is busy
+// NOTE: gemini-2.0-flash was removed — its free-tier quota is `limit: 0`, so it
+// 429s on every call and only wastes a round-trip. Re-add if a paid plan is enabled.
+const CV_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
 const CV_PROMPTS: Record<ActionType, string> = {
   recycle_bottle:  'Look for a PLASTIC drink bottle (e.g. a clear or coloured water/soda PET bottle, with or without its cap). The plastic bottle is itself the recyclable item — a recycling bin is NOT required in the photo. Verify TRUE whenever a plastic bottle is clearly visible. Reject only if there is no plastic bottle (for example a glass, ceramic mug, metal can, or an unrelated object/person). Return JSON only.',
@@ -18,7 +22,8 @@ const CV_PROMPTS: Record<ActionType, string> = {
 
 export async function verifyAction(
   photoUrl: string,
-  actionType: ActionType
+  actionType: ActionType,
+  preloadedBuffer?: Buffer
 ): Promise<CVResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY not set');
@@ -26,22 +31,37 @@ export async function verifyAction(
   const config = ACTION_CONFIG[actionType];
   const prompt = CV_PROMPTS[actionType];
 
-  // Download image from Firebase Storage
-  const bucket = admin.storage().bucket();
-  const filePath = decodeURIComponent(photoUrl.split('/o/')[1].split('?')[0]);
-  const [imageBuffer] = await bucket.file(filePath).download();
+  // Reuse the buffer the coordinator already downloaded (for hashing) when given,
+  // otherwise fetch it from Storage. Avoids a second download per submission.
+  let imageBuffer = preloadedBuffer;
+  if (!imageBuffer) {
+    const bucket = admin.storage().bucket();
+    const filePath = decodeURIComponent(photoUrl.split('/o/')[1].split('?')[0]);
+    [imageBuffer] = await bucket.file(filePath).download();
+  }
   const base64Image = imageBuffer.toString('base64');
 
   const genai = new GoogleGenerativeAI(apiKey);
 
   const systemPrompt = `
 You are a strict, objective computer vision verification agent for a children's eco-action app.
-Your only job: determine if the submitted photo VERIFIABLY shows the claimed eco-action.
+You have TWO independent jobs for the submitted photo:
+  (A) Does it VERIFIABLY show the claimed eco-action?
+  (B) Is it a GENUINE, freshly-taken phone photo of a real-world scene — not a downloaded or re-captured image?
 
-CRITICAL INSTRUCTIONS:
+CRITICAL INSTRUCTIONS FOR (A) — content:
 1. DO NOT GUESS OR ASSUME. If the required objects are not clearly visible, you MUST reject it.
 2. If the image shows an unrelated object (e.g., a laptop, phone screen, random room, person's face, or a ball), you MUST set "verified": false and "confidence": 0.0.
 3. You are defending against users uploading random photos to get free points. Be highly skeptical.
+
+CRITICAL INSTRUCTIONS FOR (B) — authenticity (defend against downloaded internet images):
+Set a LOW "authenticity" (≤ 0.3) and explain in "authenticity_reason" if you see ANY sign the image is NOT a live capture, including:
+  - Stock-photo look: studio lighting, pure white/seamless background, perfect composition, professional quality.
+  - Watermarks or logos (Getty, Shutterstock, Alamy, iStock, Adobe Stock, dreamstime, URLs, signatures).
+  - Screenshot artifacts: phone status bar, browser/app UI, search-result thumbnails, rounded UI corners, captions or text overlays.
+  - A photo OF a screen/monitor: moiré patterns, screen glare, visible pixels, device bezel around the image.
+  - Clip-art, illustrations, renders, or AI-generated images rather than a real photograph.
+Set a HIGH "authenticity" (≥ 0.7) only for ordinary candid phone snapshots: natural/imperfect framing, real ambient lighting, everyday clutter or background.
 
 Target Action to Verify:
 ${prompt}
@@ -50,8 +70,10 @@ Respond ONLY with this exact JSON structure, no markdown, no extra text:
 {
   "verified": boolean,
   "confidence": number between 0.0 and 1.0 (use 0.0 if completely unrelated),
+  "authenticity": number between 0.0 and 1.0 (1.0 = clearly a genuine live phone photo, 0.0 = clearly downloaded/screenshot/stock/photo-of-screen),
   "detected_label": "what you actually see in the image (e.g., 'A laptop screen', 'A plastic bottle')",
-  "reason": "brief explanation of your decision"
+  "reason": "brief explanation of the content decision",
+  "authenticity_reason": "brief note on why it does or does not look like a genuine live photo"
 }
 `;
 
@@ -106,6 +128,7 @@ Respond ONLY with this exact JSON structure, no markdown, no extra text:
     parsed = {
       verified: false,
       confidence: 0.0,
+      authenticity: 0.0,
       detected_label: 'unrecognized',
       reason: 'AI returned invalid JSON response format.'
     };
@@ -116,15 +139,31 @@ Respond ONLY with this exact JSON structure, no markdown, no extra text:
     parsed = {
       verified: false,
       confidence: 0.0,
+      authenticity: 0.0,
       detected_label: parsed?.detected_label || 'unrecognized',
       reason: 'AI returned empty, null, or invalid response format.'
     };
+  }
+
+  // Default authenticity if the model omitted it (older/odd responses): treat as
+  // unknown-but-passable so we never reject a genuine photo on a missing field.
+  if (typeof parsed.authenticity !== 'number') {
+    parsed.authenticity = 1.0;
   }
 
   // Apply strict confidence threshold
   if (parsed.verified && parsed.confidence < config.threshold) {
     parsed.verified = false;
     parsed.reason = `Low confidence detection: ${parsed.confidence} is below strict threshold of ${config.threshold}`;
+  }
+
+  // Apply authenticity gate — reject downloaded / screenshot / stock / photo-of-screen
+  // images even when the content itself matches the action.
+  if (parsed.verified && parsed.authenticity < AUTHENTICITY_THRESHOLD) {
+    parsed.verified = false;
+    parsed.reason =
+      parsed.authenticity_reason ||
+      'This looks like a downloaded or screenshot image, not a live photo. Take the photo yourself with the camera.';
   }
 
   return parsed;

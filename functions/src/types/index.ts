@@ -59,6 +59,7 @@ export interface ActionDocument {
   confidence: number;           // 0.0–1.0 from Gemini Vision
   detected_label: string;       // what CV agent detected
   photo_url: string;            // deleted from Storage within 24h
+  photo_hash?: string;          // perceptual dHash; survives photo deletion for dedup
   created_at: admin.firestore.Timestamp;
   processed_at: admin.firestore.Timestamp | null;
 }
@@ -68,6 +69,8 @@ export interface CVResult {
   confidence: number;
   detected_label: string;
   reason: string;               // human-readable reason for reject
+  authenticity: number;         // 0.0–1.0: how likely this is a genuine live phone photo
+  authenticity_reason?: string; // why the photo looks fake (screenshot, stock, photo-of-screen…)
 }
 
 export interface ActionConfig {

@@ -51,5 +51,13 @@ export const WATERER_MULTIPLIER = 1.5;       // bonus for water actions when Wat
 export const HEALTH_ALERT_THRESHOLD = 30;    // send push notification if health drops below this
 
 export const PHOTO_DELETE_HOURS = 24;        // delete action photos after this many hours
-export const CV_RESPONSE_TIMEOUT_MS = 15000; // 15s SLA — Gemini 2.5 Flash vision needs more headroom than 1.5
+export const CV_RESPONSE_TIMEOUT_MS = 12000; // per-model SLA; 2 models worst-case (~24s) stays under the app's 45s wait
 export const ACTION_QUEUE_INTERVAL_MINUTES = 30; // Coordinator processes queue every 30 min
+
+// ─── Anti-cheat: real-time / live-photo + duplicate detection ────────────────
+// Below this authenticity score the photo looks like a screenshot, stock image,
+// watermarked download or a photo-of-a-screen rather than a genuine live capture.
+export const AUTHENTICITY_THRESHOLD = 0.6;
+// Duplicate detection compares SHA-256 byte hashes for an EXACT match.
+// Cap how many prior images we compare against per garden (cost / latency guard).
+export const DUPLICATE_SCAN_LIMIT = 1500;

@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { verifyAction } from './cvAgent';
+import { computeImageHash } from './imageHash';
 import { runRewardAgent } from './rewardAgent';
 import { getWatererMultiplier, sendThirstyNotification } from './watererAgent';
 import { ActionDocument, ActionType, GardenState } from '../types';
@@ -9,6 +10,7 @@ import {
   GARDEN_STAGE_THRESHOLDS,
   WORLD_STAGE_THRESHOLDS,
   CLEANLINESS_MAX,
+  DUPLICATE_SCAN_LIMIT,
 } from '../config/constants';
 import { GardenStage, WorldStage, WorldPhase } from '../types';
 
@@ -28,6 +30,45 @@ function calculateWorldStage(cleanliness: number): WorldStage {
     }
   }
   return 'wasteland';
+}
+
+/**
+ * Download the action photo from Storage once. Returns the raw buffer so it can
+ * be reused for both perceptual hashing and the CV agent (no double download).
+ */
+async function downloadPhoto(photoUrl: string): Promise<Buffer> {
+  const bucket = admin.storage().bucket();
+  const filePath = decodeURIComponent(photoUrl.split('/o/')[1].split('?')[0]);
+  const [buffer] = await bucket.file(filePath).download();
+  return buffer;
+}
+
+/**
+ * Has anyone in this garden already submitted this exact image?
+ * Compares the new photo's SHA-256 against every prior action's stored hash in
+ * the SAME garden (whole-group scope). Returns the matching action's id if a
+ * duplicate is found, else null. Runs before the CV call so re-uploads are
+ * rejected without spending Gemini quota.
+ */
+async function findDuplicateInGarden(
+  gardenId: string,
+  newHash: string,
+  selfActionId: string
+): Promise<string | null> {
+  const db = admin.firestore();
+  const snap = await db
+    .collection('actions')
+    .where('garden_id', '==', gardenId)
+    .limit(DUPLICATE_SCAN_LIMIT)
+    .get();
+
+  for (const doc of snap.docs) {
+    if (doc.id === selfActionId) continue;
+    if (doc.data()?.photo_hash === newHash) {
+      return doc.id;
+    }
+  }
+  return null;
 }
 
 export async function runCoordinator(
@@ -53,14 +94,53 @@ export async function runCoordinator(
       return;
     }
 
-    // Step 1: Route to CV Agent
-    const cvResult = await verifyAction(action.photo_url, action.action_type as ActionType);
+    // Step 1: Download the photo once and fingerprint it (SHA-256 of the bytes).
+    const imageBuffer = await downloadPhoto(action.photo_url);
+    const photoHash = computeImageHash(imageBuffer);
 
-    // Step 2: Update action document with CV result and rejection reason
+    // Step 1a: Duplicate check (whole-garden) — reject re-uploads of the same
+    // image before spending any CV quota. Hash persists even after the photo is
+    // deleted, so this catches repeats across days.
+    if (photoHash) {
+      const dupId = await findDuplicateInGarden(action.garden_id, photoHash, actionId);
+      if (dupId) {
+        await actionRef.update({
+          status: 'rejected',
+          confidence: 0,
+          detected_label: 'duplicate',
+          photo_hash: photoHash,
+          rejection_reason: 'This photo has already been submitted. Snap a fresh photo of a new eco-action.',
+          processed_at: admin.firestore.Timestamp.now(),
+        });
+        console.log(`[DUPLICATE LOG] Action ${actionId} rejected — matches prior action ${dupId} in garden ${action.garden_id}.`);
+        // Remove from queue and clean up the duplicate's photo.
+        await db.collection('gardens').doc(action.garden_id).update({
+          action_queue: admin.firestore.FieldValue.arrayRemove(actionId),
+        }).catch(() => {});
+        try {
+          const bucket = admin.storage().bucket();
+          const filePath = decodeURIComponent(action.photo_url.split('/o/')[1].split('?')[0]);
+          await bucket.file(filePath).delete();
+        } catch (err) {
+          console.error('Duplicate photo deletion failed (non-fatal):', err);
+        }
+        return;
+      }
+    }
+
+    // Step 2: Route to CV Agent (reusing the already-downloaded buffer)
+    const cvResult = await verifyAction(
+      action.photo_url,
+      action.action_type as ActionType,
+      imageBuffer
+    );
+
+    // Step 2a: Update action document with CV result and rejection reason
     await actionRef.update({
       status: cvResult.verified ? 'verified' : 'rejected',
       confidence: cvResult.confidence,
       detected_label: cvResult.detected_label,
+      photo_hash: photoHash ?? null,
       rejection_reason: cvResult.verified ? null : cvResult.reason,
       processed_at: admin.firestore.Timestamp.now(),
     });
@@ -70,6 +150,7 @@ export async function runCoordinator(
     - Action Type: ${action.action_type}
     - Predicted Label: ${cvResult.detected_label}
     - Confidence Score: ${cvResult.confidence}
+    - Authenticity Score: ${cvResult.authenticity}${cvResult.authenticity_reason ? ` (${cvResult.authenticity_reason})` : ''}
     - Validation Result: ${cvResult.verified ? 'VERIFIED' : 'REJECTED'}
     - Rejection Reason: ${cvResult.verified ? 'N/A' : cvResult.reason}`);
 
