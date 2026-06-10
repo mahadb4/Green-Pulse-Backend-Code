@@ -105,7 +105,20 @@ Respond ONLY with this exact JSON structure, no markdown, no extra text:
     }
   }
   if (!text) {
-    throw lastErr instanceof Error ? lastErr : new Error('All CV models unavailable');
+    // All models timed out or returned nothing (common for blank/black/unclear
+    // photos, or a transient model hiccup). Rather than throwing a raw error to
+    // the app, return a clean rejection so the user simply gets a retry prompt.
+    console.warn(
+      `[cvAgent] All CV models failed/timed out: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`
+    );
+    return {
+      verified: false,
+      confidence: 0.0,
+      authenticity: 0.0,
+      detected_label: 'unverified',
+      reason:
+        'Zara could not read this photo — it may be too dark, blank, or unclear. Please retake it in good lighting and try again.',
+    };
   }
 
   let parsed: CVResult;

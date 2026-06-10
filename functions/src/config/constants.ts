@@ -1,12 +1,16 @@
 import { ActionType, ActionConfig } from '../types';
 
 export const ACTION_CONFIG: Record<ActionType, ActionConfig> = {
-  recycle_bottle: { points: 10, nutrient: 5,  water: 0, health: 0,  cleanliness: 8,  threshold: 0.80 },
-  plant_seed:     { points: 20, nutrient: 0,  water: 0, health: 10, cleanliness: 7,  threshold: 0.80 },
-  water_plant:    { points: 6,  nutrient: 0,  water: 8, health: 0,  cleanliness: 4,  threshold: 0.80 },
-  pick_litter:    { points: 15, nutrient: 0,  water: 0, health: 8,  cleanliness: 12, threshold: 0.80 },
-  compost_waste:  { points: 18, nutrient: 10, water: 0, health: 0,  cleanliness: 9,  threshold: 0.85 },
-  turn_off_light: { points: 5,  nutrient: 0,  water: 0, health: 3,  cleanliness: 5,  threshold: 0.90 },
+  // Every verified action now also gives a small baseline (+3) to the
+  // non-signature resources, so Health / Water / Nutrient all rise with each
+  // scan and stay consistent with the World cleanliness %. The signature
+  // resource for each action (e.g. water for water_plant) still dominates.
+  recycle_bottle: { points: 10, nutrient: 5,  water: 3, health: 3,  cleanliness: 8,  threshold: 0.80 },
+  plant_seed:     { points: 20, nutrient: 4,  water: 3, health: 10, cleanliness: 7,  threshold: 0.80 },
+  water_plant:    { points: 6,  nutrient: 3,  water: 8, health: 3,  cleanliness: 4,  threshold: 0.80 },
+  pick_litter:    { points: 15, nutrient: 3,  water: 3, health: 8,  cleanliness: 12, threshold: 0.80 },
+  compost_waste:  { points: 18, nutrient: 10, water: 3, health: 3,  cleanliness: 9,  threshold: 0.85 },
+  turn_off_light: { points: 5,  nutrient: 3,  water: 3, health: 3,  cleanliness: 5,  threshold: 0.90 },
 };
 
 export const GARDEN_STAGE_THRESHOLDS = {
@@ -51,7 +55,7 @@ export const WATERER_MULTIPLIER = 1.5;       // bonus for water actions when Wat
 export const HEALTH_ALERT_THRESHOLD = 30;    // send push notification if health drops below this
 
 export const PHOTO_DELETE_HOURS = 24;        // delete action photos after this many hours
-export const CV_RESPONSE_TIMEOUT_MS = 12000; // per-model SLA; 2 models worst-case (~24s) stays under the app's 45s wait
+export const CV_RESPONSE_TIMEOUT_MS = 9000; // per-model SLA; 2 models worst-case (~18s) stays well under the app's 45s wait
 export const ACTION_QUEUE_INTERVAL_MINUTES = 30; // Coordinator processes queue every 30 min
 
 // ─── Anti-cheat: real-time / live-photo + duplicate detection ────────────────
