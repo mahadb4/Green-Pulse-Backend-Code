@@ -1,6 +1,6 @@
 {
   "projects": {
-    "default": "greenpulse-dev",
+    "default": "greenpulse-dev-63b4b",
     "dev": "greenpulse-dev-63b4b"
   },
   "targets": {},

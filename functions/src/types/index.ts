@@ -2,6 +2,20 @@ import * as admin from 'firebase-admin';
 
 export type GardenStage = 'barren' | 'seedling' | 'sapling' | 'tree' | 'forest';
 
+// World cleanup progression (drives the 3D world): 0 = polluted wasteland, 100 = pristine eco-city.
+export type WorldStage = 'wasteland' | 'polluted' | 'recovering' | 'clean' | 'eco_city';
+
+// Two game phases: clean the polluted world, then build a pollution-free city on it.
+export type WorldPhase = 'cleanup' | 'building';
+
+export interface Building {
+  id: string;
+  type: string;            // e.g. 'house', 'park', 'solar_plant', 'windmill'
+  x: number;               // grid coordinates in the 3D world
+  z: number;
+  placed_at: admin.firestore.Timestamp;
+}
+
 export type ActionType =
   | 'recycle_bottle'
   | 'plant_seed'
@@ -13,13 +27,19 @@ export type ActionType =
 export type ActionStatus = 'pending' | 'verifying' | 'verified' | 'approved' | 'rejected' | 'failed';
 
 export interface GardenState {
-  garden_health: number;        // 0–100
+  garden_health: number;        // 0–100  (legacy garden metric, kept for back-compat)
   garden_stage: GardenStage;
   water_level: number;          // 0–100
   nutrient_level: number;       // 0–100
   action_queue: string[];       // array of action IDs pending processing
   member_count: number;
   created_at: admin.firestore.Timestamp;
+
+  // ─── World cleanup + city builder (new core mechanic) ───────────────────────
+  cleanliness: number;          // 0–100, raised by verified eco-actions
+  world_stage: WorldStage;      // derived from cleanliness
+  phase: WorldPhase;            // 'cleanup' until cleanliness hits 100, then 'building'
+  buildings: Building[];        // city placed in the building phase
 }
 
 export interface ChildState {
@@ -39,6 +59,7 @@ export interface ActionDocument {
   confidence: number;           // 0.0–1.0 from Gemini Vision
   detected_label: string;       // what CV agent detected
   photo_url: string;            // deleted from Storage within 24h
+  photo_hash?: string;          // perceptual dHash; survives photo deletion for dedup
   created_at: admin.firestore.Timestamp;
   processed_at: admin.firestore.Timestamp | null;
 }
@@ -48,6 +69,8 @@ export interface CVResult {
   confidence: number;
   detected_label: string;
   reason: string;               // human-readable reason for reject
+  authenticity: number;         // 0.0–1.0: how likely this is a genuine live phone photo
+  authenticity_reason?: string; // why the photo looks fake (screenshot, stock, photo-of-screen…)
 }
 
 export interface ActionConfig {
@@ -55,5 +78,6 @@ export interface ActionConfig {
   nutrient: number;
   water: number;
   health: number;
+  cleanliness: number;          // how much this action cleans the world (0–100 scale)
   threshold: number;            // minimum confidence to verify
 }

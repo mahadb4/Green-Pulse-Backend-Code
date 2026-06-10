@@ -17,6 +17,25 @@ service cloud.firestore {
       allow read: if request.auth != null;
     }
 
+    // ─── Usernames (uniqueness registry) ──────────────────────────────────────
+    // Maps a lowercased username → owning uid so nicknames stay globally unique.
+    // Any authenticated user may read (to check availability). A user may only
+    // claim/write an entry that stores their OWN uid, and may not overwrite an
+    // entry already owned by someone else. Written transactionally alongside the
+    // child's nickname during onboarding (see NicknameScreen).
+    match /usernames/{username} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.resource.data.uid == request.auth.uid
+                   && (resource == null || resource.data.uid == request.auth.uid);
+    }
+
+    // ─── Users (account profile mirror) ───────────────────────────────────────
+    // Each user can read/write only their own users/{uid} document.
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
     // ─── Gardens ──────────────────────────────────────────────────────────────
     // Any authenticated user can read; authenticated users can write
     // (Cloud Functions Admin SDK also writes here, bypassing rules).
@@ -39,6 +58,13 @@ service cloud.firestore {
                     && resource.data.child_uid == request.auth.uid;
       // Delete only via Admin SDK (Cloud Function deleteAllData)
       allow delete: if false;
+    }
+
+    // ─── Parent TOTP secrets ──────────────────────────────────────────────────
+    // Server-only. The Admin SDK (Cloud Functions) bypasses these rules; no client
+    // — including the child — may ever read or write a parent's authenticator secret.
+    match /parent_secrets/{uid} {
+      allow read, write: if false;
     }
 
     // ─── Reward Log ───────────────────────────────────────────────────────────
